@@ -17,9 +17,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract project
+      - name: Install RAR extractor
         run: |
-          unzip -q "NEXUS-prototype-0.3.1-github.zip" -d source
+          sudo apt-get update
+          sudo apt-get install -y unar
+
+      - name: Extract NEXUS.rar
+        run: |
+          mkdir -p source
+          unar -o source NEXUS.rar
+
+      - name: Find Android project
+        id: project
+        run: |
+          SETTINGS=$(find source -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -print -quit)
+          if [ -z "$SETTINGS" ]; then
+            echo "Android project settings.gradle not found!"
+            find source -maxdepth 4 -type f
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Project directory: $PROJECT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -27,10 +46,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         run: |
@@ -42,17 +59,19 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Build APK
-        working-directory: source/NEXUS
-        run: gradle --no-daemon :app:assembleDebug
-
-      - name: Rename APK
         run: |
-          mv source/NEXUS/app/build/outputs/apk/debug/app-debug.apk \
-             "source/NEXUS/app/build/outputs/apk/debug/switcher +.apk"
+          gradle --no-daemon -p "${{ steps.project.outputs.dir }}" :app:assembleDebug
+
+      - name: Prepare APK
+        run: |
+          APK="${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          mkdir -p output
+          cp "$APK" "output/switcher +.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: switcher +
-          path: "source/NEXUS/app/build/outputs/apk/debug/switcher +.apk"
+          path: "output/switcher +.apk"
           if-no-files-found: error
