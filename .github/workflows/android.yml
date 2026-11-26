@@ -9,45 +9,40 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-build
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Build Switcher +
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install RAR extractor
+      - name: Check archive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unar
-
-      - name: Extract NEXUS.rar
-        run: |
-          mkdir -p source
-          unar -o source NEXUS.rar
-
-      - name: Find Android project
-        id: project
-        run: |
-          SETTINGS=$(find source -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -print -quit)
-          if [ -z "$SETTINGS" ]; then
-            echo "Android project settings.gradle not found!"
-            find source -maxdepth 4 -type f
+          test -f "NEXUS-fixed.zip" || {
+            echo "NEXUS-fixed.zip not found in repository root!"
             exit 1
-          fi
-          PROJECT_DIR=$(dirname "$SETTINGS")
-          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-          echo "Project directory: $PROJECT_DIR"
+          }
 
-      - name: Set up Java
+      - name: Extract project
+        run: |
+          unzip -q NEXUS-fixed.zip -d source
+          test -f source/NEXUS/settings.gradle.kts
+
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
         run: |
@@ -60,14 +55,15 @@ jobs:
 
       - name: Build APK
         run: |
-          gradle --no-daemon -p "${{ steps.project.outputs.dir }}" :app:assembleDebug
+          gradle --no-daemon \
+            -p source/NEXUS \
+            :app:assembleDebug
 
       - name: Prepare APK
         run: |
-          APK="${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
           mkdir -p output
-          cp "$APK" "output/switcher +.apk"
+          cp source/NEXUS/app/build/outputs/apk/debug/app-debug.apk \
+             "output/switcher +.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -75,3 +71,4 @@ jobs:
           name: switcher +
           path: "output/switcher +.apk"
           if-no-files-found: error
+          retention-days: 14
